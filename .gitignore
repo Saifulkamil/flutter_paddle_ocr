@@ -34,3 +34,5 @@ build/
 
 # Ignore unzipped massive font header
 myfontface.h
+history_commit.sh
+log_kegiatan.csv

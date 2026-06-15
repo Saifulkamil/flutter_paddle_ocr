@@ -135,6 +135,18 @@ class OcrPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry
                 }
             }
         }
+        "setLedParams" -> {
+            val valueThresh = call.argument<Int>("valueThresh") ?: 0
+            val rThresh = call.argument<Int>("rThresh") ?: 0
+            val morphSize = call.argument<Int>("morphSize") ?: 0
+            val success = ppocrv5ncnn.setLedParams(valueThresh, rThresh, morphSize)
+            result.success(success)
+        }
+        "setCharFilter" -> {
+            val allowedChars = call.argument<String>("allowedChars") ?: ""
+            val success = ppocrv5ncnn.setCharFilter(allowedChars)
+            result.success(success)
+        }
         "cropImage" -> {
             val sourcePath = call.argument<String>("sourcePath") ?: ""
             if (sourcePath.isEmpty() || activity == null) {

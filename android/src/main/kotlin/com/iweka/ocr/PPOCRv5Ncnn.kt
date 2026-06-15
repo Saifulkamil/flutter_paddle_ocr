@@ -18,6 +18,8 @@ class PPOCRv5Ncnn {
     external fun ocrFromImage(imagePath: String): String
     external fun setTargetRect(normW: Float, normH: Float): Boolean
     external fun setPhotoMode(isPhoto: Boolean): Boolean
+    external fun setLedParams(valueThresh: Int, rThresh: Int, morphSize: Int): Boolean
+    external fun setCharFilter(allowedChars: String): Boolean
 
     companion object {
         init {

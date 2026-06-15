@@ -11,7 +11,9 @@ class MethodChannelOcr extends OcrPlatform {
 
   @override
   Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
+    final version = await methodChannel.invokeMethod<String>(
+      'getPlatformVersion',
+    );
     return version;
   }
 
@@ -71,13 +73,18 @@ class MethodChannelOcr extends OcrPlatform {
 
   @override
   Future<bool?> setTargetRect(double w, double h) async {
-    final success = await methodChannel.invokeMethod<bool>('setTargetRect', {'w': w, 'h': h});
+    final success = await methodChannel.invokeMethod<bool>('setTargetRect', {
+      'w': w,
+      'h': h,
+    });
     return success;
   }
 
   @override
   Future<bool?> setPhotoMode(bool isPhoto) async {
-    final success = await methodChannel.invokeMethod<bool>('setPhotoMode', {'isPhoto': isPhoto});
+    final success = await methodChannel.invokeMethod<bool>('setPhotoMode', {
+      'isPhoto': isPhoto,
+    });
     return success;
   }
 
@@ -87,6 +94,24 @@ class MethodChannelOcr extends OcrPlatform {
       'imagePath': imagePath,
     });
     return result;
+  }
+
+  @override
+  Future<bool> setLedParams(int valueThresh, int rThresh, int morphSize) async {
+    final result = await methodChannel.invokeMethod<bool>('setLedParams', {
+      'valueThresh': valueThresh,
+      'rThresh': rThresh,
+      'morphSize': morphSize,
+    });
+    return result ?? false;
+  }
+
+  @override
+  Future<bool> setCharFilter(String allowedChars) async {
+    final result = await methodChannel.invokeMethod<bool>('setCharFilter', {
+      'allowedChars': allowedChars,
+    });
+    return result ?? false;
   }
 
   @override

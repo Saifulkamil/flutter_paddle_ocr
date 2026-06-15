@@ -18,7 +18,11 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(debugShowCheckedModeBanner: false, theme: ThemeData.light(), home: const OcrScanScreen());
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.light(),
+      home: const OcrScanScreen(),
+    );
   }
 }
 
@@ -29,7 +33,12 @@ class OcrCapture {
   final String ocrText;
   final DateTime timestamp;
 
-  OcrCapture({required this.photoPath, this.croppedPath = '', required this.ocrText, required this.timestamp});
+  OcrCapture({
+    required this.photoPath,
+    this.croppedPath = '',
+    required this.ocrText,
+    required this.timestamp,
+  });
 }
 
 enum OcrMode { realtime, photo }
@@ -41,7 +50,8 @@ class OcrScanScreen extends StatefulWidget {
   State<OcrScanScreen> createState() => _OcrScanScreenState();
 }
 
-class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProviderStateMixin {
+class _OcrScanScreenState extends State<OcrScanScreen>
+    with SingleTickerProviderStateMixin {
   final _ocrPlugin = Ocr();
 
   OcrMode _mode = OcrMode.realtime;
@@ -56,6 +66,18 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
   late Animation<double> _scanAnim;
 
   String _ocrResult = '';
+
+  // LED Preprocessing Parameters (0 = disabled/general mode)
+  int _ledValueThresh = 0;
+  int _ledRThresh = 0;
+  int _ledMorphSize = 0;
+  String _charFilter = ''; // empty = all chars accepted
+
+  bool get _isLedMode =>
+      _ledValueThresh > 0 ||
+      _ledRThresh > 0 ||
+      _ledMorphSize > 0 ||
+      _charFilter.isNotEmpty;
 
   // Path model yang sedang aktif
   String? _activeDetParam;
@@ -75,11 +97,13 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _scanAnimController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
-    _scanAnim = Tween<double>(
-      begin: 0.05,
-      end: 0.90,
-    ).animate(CurvedAnimation(parent: _scanAnimController, curve: Curves.easeInOut));
+    _scanAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    _scanAnim = Tween<double>(begin: 0.05, end: 0.90).animate(
+      CurvedAnimation(parent: _scanAnimController, curve: Curves.easeInOut),
+    );
     _requestPermission();
   }
 
@@ -113,7 +137,7 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
         detModel: detModel,
         recParam: recParam,
         recModel: recModel,
-        sizeid: 0,
+        sizeid: 4,
         cpugpu: 0,
       );
 
@@ -180,7 +204,10 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.green, content: Text('✅ Model successfully loaded from device!')),
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('✅ Model successfully loaded from device!'),
+          ),
         );
       }
 
@@ -189,9 +216,12 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
       setState(() => _isLoadingModel = false);
       debugPrint('Error loading model from phone: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text('Failed to load model: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red,
+            content: Text('Failed to load model: $e'),
+          ),
+        );
       }
     }
   }
@@ -253,9 +283,12 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
       return;
     }
     if (_mode == OcrMode.realtime && _ocrResult.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(backgroundColor: Colors.red, content: Text("No OCR result")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text("No OCR result"),
+        ),
+      );
       return;
     }
 
@@ -268,11 +301,11 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
         setState(() => _isLoadingModel = true); // use loading state for UI
 
         // Ensure target rect is set before capture
-        // Use the known overlay dimensions vs the camera area
+        // Use the known overlay dimensions vs the full screen camera area
         final screenW = MediaQuery.of(context).size.width;
-        final cameraW = screenW - 32; // margin 16 each side
-        final normW = 300.0 / cameraW;
-        final normH = 220.0 / 300.0; // safe approximate ratio
+        final screenH = MediaQuery.of(context).size.height;
+        final normW = 300.0 / screenW;
+        final normH = 220.0 / screenH;
         debugPrint('[PhotoMode] setTargetRect normW=$normW, normH=$normH');
         await _ocrPlugin.setTargetRect(normW, normH);
 
@@ -313,12 +346,24 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
         setState(() => _isLoadingModel = false);
       } else {
         // Realtime mode
-        final results = await Future.wait([_ocrPlugin.takePhoto(savePath), _ocrPlugin.getOcrText()]);
-        final photoPath = results[0] as String?;
+        final results = await Future.wait([
+          _ocrPlugin.takePhoto(savePath),
+          _ocrPlugin.getOcrText(),
+        ]);
+        final resultPaths = results[0] as String?;
         final ocrSnapshot = results[1] as String?;
 
-        if (photoPath != null && photoPath.isNotEmpty) {
-          final capture = OcrCapture(photoPath: photoPath, ocrText: ocrSnapshot ?? '', timestamp: DateTime.now());
+        if (resultPaths != null && resultPaths.isNotEmpty) {
+          final paths = resultPaths.split('|');
+          final origPath = paths[0];
+          final cropPath = paths.length > 1 ? paths[1] : '';
+
+          final capture = OcrCapture(
+            photoPath: origPath,
+            croppedPath: cropPath,
+            ocrText: ocrSnapshot ?? '',
+            timestamp: DateTime.now(),
+          );
           setState(() {
             _latestCapture = capture;
             _captureHistory.insert(0, capture);
@@ -361,13 +406,24 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                   Expanded(
                     child: Column(
                       children: [
-                        const Text("Original Image", style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        const Text(
+                          "Original Image",
+                          style: TextStyle(fontSize: 12, color: Colors.black54),
+                        ),
                         const SizedBox(height: 4),
                         GestureDetector(
-                          onTap: () => _openFullScreenImage(context, capture.photoPath, "Original Image"),
+                          onTap: () => _openFullScreenImage(
+                            context,
+                            capture.photoPath,
+                            "Original Image",
+                          ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: Image.file(File(capture.photoPath), height: 140, fit: BoxFit.cover),
+                            child: Image.file(
+                              File(capture.photoPath),
+                              height: 140,
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
                       ],
@@ -378,13 +434,27 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                     Expanded(
                       child: Column(
                         children: [
-                          const Text("OCR Result", style: TextStyle(fontSize: 12, color: Colors.black54)),
+                          const Text(
+                            "OCR Result",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           GestureDetector(
-                            onTap: () => _openFullScreenImage(context, capture.croppedPath, "OCR Result"),
+                            onTap: () => _openFullScreenImage(
+                              context,
+                              capture.croppedPath,
+                              "OCR Result",
+                            ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.file(File(capture.croppedPath), height: 140, fit: BoxFit.contain),
+                              child: Image.file(
+                                File(capture.croppedPath),
+                                height: 140,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           ),
                         ],
@@ -397,12 +467,22 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 constraints: const BoxConstraints(maxHeight: 120),
                 child: SingleChildScrollView(
                   child: Text(
-                    capture.ocrText.isEmpty ? "No text detected" : capture.ocrText,
-                    style: TextStyle(fontSize: 15, color: capture.ocrText.isEmpty ? Colors.black54 : Colors.black87),
+                    capture.ocrText.isEmpty
+                        ? "No text detected"
+                        : capture.ocrText,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: capture.ocrText.isEmpty
+                          ? Colors.black54
+                          : Colors.black87,
+                    ),
                   ),
                 ),
               ),
@@ -411,9 +491,14 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: const Text("Close", style: TextStyle(color: Colors.white)),
+                child: const Text(
+                  "Close",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -467,9 +552,512 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       isScrollControlled: true,
       builder: (_) => _HistorySheet(captures: _captureHistory),
+    );
+  }
+
+  void _showLedSettingsDialog() {
+    int tempValue = _ledValueThresh;
+    int tempR = _ledRThresh;
+    int tempMorph = _ledMorphSize;
+    String tempCharFilter = _charFilter;
+    final charFilterController = TextEditingController(text: _charFilter);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final bool isActive =
+                tempValue > 0 ||
+                tempR > 0 ||
+                tempMorph > 0 ||
+                tempCharFilter.isNotEmpty;
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Handle
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Title
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.settings_brightness_rounded,
+                          color: Colors.deepOrange,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'LED Display Settings',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            Text(
+                              'Set all to 0 for general text mode',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black45,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Status indicator
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? Colors.deepOrange.withOpacity(0.06)
+                          : Colors.blue.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isActive
+                            ? Colors.deepOrange.withOpacity(0.2)
+                            : Colors.blue.withOpacity(0.2),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isActive
+                              ? Icons.settings_brightness
+                              : Icons.text_fields,
+                          size: 16,
+                          color: isActive ? Colors.deepOrange : Colors.blue,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isActive ? 'Mode: LED Display' : 'Mode: General Text',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isActive
+                                ? Colors.deepOrange[700]
+                                : Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Value Threshold slider
+                  _buildSliderRow(
+                    label: 'Value Threshold (HSV)',
+                    value: tempValue,
+                    min: 0,
+                    max: 255,
+                    hint: '0=off, 180-200 recommended',
+                    activeColor: Colors.deepOrange,
+                    onChanged: (v) => setModalState(() => tempValue = v),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // R-channel threshold slider
+                  _buildSliderRow(
+                    label: 'R-Channel Threshold',
+                    value: tempR,
+                    min: 0,
+                    max: 255,
+                    hint: '0=off, 150-180 recommended',
+                    activeColor: Colors.red,
+                    onChanged: (v) => setModalState(() => tempR = v),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Morph kernel size slider
+                  _buildSliderRow(
+                    label: 'Morph Kernel Size',
+                    value: tempMorph,
+                    min: 0,
+                    max: 9,
+                    hint: '0=off, 3 or 5 recommended',
+                    activeColor: Colors.purple,
+                    onChanged: (v) {
+                      // Only allow odd values or 0
+                      if (v > 0 && v % 2 == 0) v = v + 1;
+                      setModalState(() => tempMorph = v);
+                    },
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Character filter
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Character Filter',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: tempCharFilter.isNotEmpty
+                                  ? Colors.teal.withOpacity(0.1)
+                                  : Colors.grey[100],
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              tempCharFilter.isEmpty
+                                  ? 'ALL'
+                                  : '${tempCharFilter.length} chars',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: tempCharFilter.isNotEmpty
+                                    ? Colors.teal
+                                    : Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Empty = accept all characters',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: charFilterController,
+                        decoration: InputDecoration(
+                          hintText: 'e.g. 0123456789.',
+                          hintStyle: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 13,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: Colors.teal),
+                          ),
+                          suffixIcon: tempCharFilter.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () {
+                                    charFilterController.clear();
+                                    setModalState(() => tempCharFilter = '');
+                                  },
+                                )
+                              : null,
+                        ),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontFamily: 'monospace',
+                        ),
+                        onChanged: (v) =>
+                            setModalState(() => tempCharFilter = v),
+                      ),
+                      const SizedBox(height: 8),
+                      // Quick char filter presets
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          _PresetChip(
+                            label: 'All',
+                            selected: tempCharFilter.isEmpty,
+                            onTap: () {
+                              charFilterController.clear();
+                              setModalState(() => tempCharFilter = '');
+                            },
+                          ),
+                          _PresetChip(
+                            label: '0-9 .',
+                            selected: tempCharFilter == '0123456789.',
+                            onTap: () {
+                              charFilterController.text = '0123456789.';
+                              setModalState(
+                                () => tempCharFilter = '0123456789.',
+                              );
+                            },
+                          ),
+                          _PresetChip(
+                            label: '0-9 A-Z',
+                            selected:
+                                tempCharFilter ==
+                                '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                            onTap: () {
+                              const v = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                              charFilterController.text = v;
+                              setModalState(() => tempCharFilter = v);
+                            },
+                          ),
+                          _PresetChip(
+                            label: '0-9 a-z A-Z .',
+                            selected:
+                                tempCharFilter ==
+                                '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.',
+                            onTap: () {
+                              const v =
+                                  '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.';
+                              charFilterController.text = v;
+                              setModalState(() => tempCharFilter = v);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Quick presets
+                  Row(
+                    children: [
+                      const Text(
+                        'LED Presets:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _PresetChip(
+                        label: 'Off',
+                        selected: !isActive,
+                        onTap: () {
+                          charFilterController.clear();
+                          setModalState(() {
+                            tempValue = 0;
+                            tempR = 0;
+                            tempMorph = 0;
+                            tempCharFilter = '';
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _PresetChip(
+                        label: 'Soft',
+                        selected:
+                            tempValue == 160 && tempR == 130 && tempMorph == 3,
+                        onTap: () => setModalState(() {
+                          tempValue = 160;
+                          tempR = 130;
+                          tempMorph = 3;
+                        }),
+                      ),
+                      const SizedBox(width: 6),
+                      _PresetChip(
+                        label: 'Normal',
+                        selected:
+                            tempValue == 180 && tempR == 150 && tempMorph == 3,
+                        onTap: () => setModalState(() {
+                          tempValue = 180;
+                          tempR = 150;
+                          tempMorph = 3;
+                        }),
+                      ),
+                      const SizedBox(width: 6),
+                      _PresetChip(
+                        label: 'Aggressive',
+                        selected:
+                            tempValue == 200 && tempR == 180 && tempMorph == 5,
+                        onTap: () => setModalState(() {
+                          tempValue = 200;
+                          tempR = 180;
+                          tempMorph = 5;
+                        }),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.grey[700],
+                            side: BorderSide(color: Colors.grey[300]!),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            await _ocrPlugin.setLedParams(
+                              tempValue,
+                              tempR,
+                              tempMorph,
+                            );
+                            await _ocrPlugin.setCharFilter(tempCharFilter);
+                            setState(() {
+                              _ledValueThresh = tempValue;
+                              _ledRThresh = tempR;
+                              _ledMorphSize = tempMorph;
+                              _charFilter = tempCharFilter;
+                            });
+                            if (context.mounted) Navigator.of(context).pop();
+                          },
+                          icon: const Icon(Icons.check_rounded, size: 18),
+                          label: const Text('Apply'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepOrange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  SizedBox(height: MediaQuery.of(context).padding.bottom),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildSliderRow({
+    required String label,
+    required int value,
+    required int min,
+    required int max,
+    required String hint,
+    required Color activeColor,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: value > 0
+                    ? activeColor.withOpacity(0.1)
+                    : Colors.grey[100],
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                value == 0 ? 'OFF' : '$value',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: value > 0 ? activeColor : Colors.grey,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(hint, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        SliderTheme(
+          data: SliderThemeData(
+            activeTrackColor: activeColor,
+            thumbColor: activeColor,
+            inactiveTrackColor: Colors.grey[200],
+            overlayColor: activeColor.withOpacity(0.1),
+          ),
+          child: Slider(
+            value: value.toDouble(),
+            min: min.toDouble(),
+            max: max.toDouble(),
+            divisions: max - min,
+            onChanged: (v) => onChanged(v.round()),
+          ),
+        ),
+      ],
     );
   }
 
@@ -486,14 +1074,14 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
 
   Widget _buildCameraArea() {
     const double frameW = 300;
-    const double frameH = 220;
+    const double frameH = 200;
     const double cornerLen = 28;
     const double strokeW = 3.5;
     const double radius = 16.0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double cameraW = constraints.maxWidth - 32; // margin 16 on each side
+        final double cameraW = constraints.maxWidth;
         final double cameraH = constraints.maxHeight;
 
         if (cameraW > 0 && cameraH > 0) {
@@ -506,44 +1094,72 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
           }
         }
 
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 1. Camera preview filling the container
-                if (_cameraOpen && !_showPreview) const Positioned.fill(child: OcrCameraView()),
+        return Stack(
+          alignment: const Alignment(0, -0.25),
+          children: [
+            // 1. Camera preview filling the container
+            if (_cameraOpen && !_showPreview)
+              const Positioned.fill(child: OcrCameraView()),
 
-                // 2. Corner brackets as an overlay in the center
-                if (_cameraOpen && !_showPreview)
-                  CustomPaint(
-                    size: const Size(frameW, frameH),
-                    painter: _CornerBracketPainter(
-                      cornerLength: cornerLen,
-                      strokeWidth: strokeW,
-                      color: Colors.lightGreen,
-                      radius: radius,
-                    ),
-                  ),
-
-                // If camera is closed
-                if (!_cameraOpen && !_showPreview)
-                  Container(
-                    color: Colors.grey[200],
-                    child: Center(
-                      child: Icon(
-                        _mode == OcrMode.photo ? Icons.image_outlined : Icons.videocam_off_rounded,
-                        size: 48,
-                        color: Colors.black26,
+            // Dim overlay with cutout hole
+            if (_cameraOpen && !_showPreview)
+              ColorFiltered(
+                colorFilter: ColorFilter.mode(
+                  Colors.black.withOpacity(0.6),
+                  BlendMode.srcOut,
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black,
+                        backgroundBlendMode: BlendMode.dstOut,
                       ),
                     ),
+                    Align(
+                      alignment: const Alignment(0, -0.25),
+                      child: Container(
+                        width: frameW,
+                        height: frameH,
+                        decoration: BoxDecoration(
+                          color: Colors.red, // cutout color
+                          borderRadius: BorderRadius.circular(radius),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // 2. Corner brackets as an overlay in the center
+            if (_cameraOpen && !_showPreview)
+              Align(
+                alignment: const Alignment(0, -0.25),
+                child: CustomPaint(
+                  size: const Size(frameW, frameH),
+                  painter: _CornerBracketPainter(
+                    cornerLength: cornerLen,
+                    strokeWidth: strokeW,
+                    color: Colors.lightGreen,
+                    radius: radius,
                   ),
-              ],
-            ),
-          ),
+                ),
+              ),
+
+            // If camera is closed
+            if (!_cameraOpen && !_showPreview)
+              Container(
+                color: Colors.black,
+                child: const Center(
+                  child: Icon(
+                    Icons.videocam_off_rounded,
+                    size: 48,
+                    color: Colors.white24,
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -552,9 +1168,12 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.black,
       body: Stack(
         children: [
+          // Camera Base Layer
+          Positioned.fill(child: _buildCameraArea()),
+
           // Main UI
           SafeArea(
             child: Column(
@@ -566,8 +1185,14 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                   margin: const EdgeInsets.symmetric(horizontal: 24),
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.grey.withOpacity(0.1),
+                    color: Colors.white.withOpacity(0.9),
                     borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
@@ -581,18 +1206,29 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: _mode == OcrMode.realtime ? Colors.white : Colors.transparent,
+                              color: _mode == OcrMode.realtime
+                                  ? Colors.white
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: _mode == OcrMode.realtime
-                                  ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)]
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 4,
+                                      ),
+                                    ]
                                   : null,
                             ),
                             alignment: Alignment.center,
                             child: Text(
                               "Realtime",
                               style: TextStyle(
-                                color: _mode == OcrMode.realtime ? Colors.blue.shade700 : Colors.black54,
-                                fontWeight: _mode == OcrMode.realtime ? FontWeight.w600 : FontWeight.w500,
+                                color: _mode == OcrMode.realtime
+                                    ? Colors.blue.shade700
+                                    : Colors.black54,
+                                fontWeight: _mode == OcrMode.realtime
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
                               ),
                             ),
                           ),
@@ -610,18 +1246,29 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: _mode == OcrMode.photo ? Colors.white : Colors.transparent,
+                              color: _mode == OcrMode.photo
+                                  ? Colors.white
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: _mode == OcrMode.photo
-                                  ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)]
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 4,
+                                      ),
+                                    ]
                                   : null,
                             ),
                             alignment: Alignment.center,
                             child: Text(
                               "Photo & Crop",
                               style: TextStyle(
-                                color: _mode == OcrMode.photo ? Colors.blue.shade700 : Colors.black54,
-                                fontWeight: _mode == OcrMode.photo ? FontWeight.w600 : FontWeight.w500,
+                                color: _mode == OcrMode.photo
+                                    ? Colors.blue.shade700
+                                    : Colors.black54,
+                                fontWeight: _mode == OcrMode.photo
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
                               ),
                             ),
                           ),
@@ -636,23 +1283,36 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                 Text(
                   _mode == OcrMode.photo
                       ? "Take Photo to Crop"
-                      : (_showPreview ? "Photo Result" : "Point camera at text"),
-                  style: const TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.w500),
+                      : (_showPreview
+                            ? "Photo Result"
+                            : "Point camera at text"),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   _mode == OcrMode.photo
                       ? "Choose from gallery or camera"
-                      : (_showPreview ? "Tap photo again for new scan" : "Ensure text is inside the area"),
-                  style: const TextStyle(color: Colors.black45, fontSize: 13),
+                      : (_showPreview
+                            ? "Tap photo again for new scan"
+                            : "Ensure text is inside the area"),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+                  ),
                 ),
 
                 const SizedBox(height: 28),
 
-                // Scan frame with camera inside
-                Expanded(child: Center(child: _buildCameraArea())),
+                // Empty space for the camera hole
+                const Expanded(child: SizedBox()),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 250),
 
                 // Hasil OCR box
                 Padding(
@@ -664,7 +1324,11 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
                       ],
                     ),
                     child: Column(
@@ -674,12 +1338,19 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                           children: [
                             const Text(
                               "OCR Result",
-                              style: TextStyle(color: Colors.black, fontSize: 15, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             const Spacer(),
                             if (_showPreview)
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withOpacity(0.15),
                                   borderRadius: BorderRadius.circular(6),
@@ -687,9 +1358,19 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.check_circle, color: Colors.green, size: 14),
+                                    Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 14,
+                                    ),
                                     SizedBox(width: 4),
-                                    Text("Saved", style: TextStyle(color: Colors.green, fontSize: 11)),
+                                    Text(
+                                      "Saved",
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 11,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -698,7 +1379,10 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                         const SizedBox(height: 10),
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 14,
+                          ),
                           constraints: const BoxConstraints(maxHeight: 100),
                           decoration: BoxDecoration(
                             color: Colors.grey[100],
@@ -709,9 +1393,13 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                             child: Text(
                               _ocrResult.isEmpty ? "No result yet" : _ocrResult,
                               style: TextStyle(
-                                color: _ocrResult.isEmpty ? Colors.black38 : Colors.black87,
+                                color: _ocrResult.isEmpty
+                                    ? Colors.black38
+                                    : Colors.black87,
                                 fontSize: 16,
-                                fontWeight: _ocrResult.isEmpty ? FontWeight.normal : FontWeight.bold,
+                                fontWeight: _ocrResult.isEmpty
+                                    ? FontWeight.normal
+                                    : FontWeight.bold,
                               ),
                             ),
                           ),
@@ -725,18 +1413,20 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                 // Flash + Switch Camera buttons
                 if (_cameraOpen && !_showPreview)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         _ActionButton(
-                          icon: _flashOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                          icon: _flashOn
+                              ? Icons.flash_on_rounded
+                              : Icons.flash_off_rounded,
                           label: _flashOn ? "Flash On" : "Flash Off",
                           active: _flashOn,
                           activeColor: Colors.amber,
                           onTap: _toggleFlash,
                         ),
-                        const SizedBox(width: 32),
+                        const SizedBox(width: 20),
                         _ActionButton(
                           icon: Icons.cameraswitch_rounded,
                           label: "Switch",
@@ -744,8 +1434,18 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                           activeColor: Colors.green,
                           onTap: _switchCamera,
                         ),
+                        const SizedBox(width: 20),
+                        _ActionButton(
+                          icon: _isLedMode
+                              ? Icons.settings_brightness_rounded
+                              : Icons.text_fields_rounded,
+                          label: _isLedMode ? "LED" : "Text",
+                          active: _isLedMode,
+                          activeColor: Colors.deepOrange,
+                          onTap: _showLedSettingsDialog,
+                        ),
                         if (_captureHistory.isNotEmpty) ...[
-                          const SizedBox(width: 32),
+                          const SizedBox(width: 20),
                           _ActionButton(
                             icon: Icons.photo_library_outlined,
                             label: "History",
@@ -764,10 +1464,17 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                     padding: const EdgeInsets.only(bottom: 4),
                     child: TextButton.icon(
                       onPressed: _showHistory,
-                      icon: const Icon(Icons.photo_library_outlined, color: Colors.black54, size: 18),
+                      icon: const Icon(
+                        Icons.photo_library_outlined,
+                        color: Colors.black54,
+                        size: 18,
+                      ),
                       label: Text(
                         "View all (${_captureHistory.length})",
-                        style: const TextStyle(color: Colors.black54, fontSize: 13),
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ),
@@ -784,18 +1491,24 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                       icon: Icon(
                         _mode == OcrMode.photo
                             ? Icons.add_photo_alternate_rounded
-                            : (_showPreview ? Icons.camera_alt_outlined : Icons.camera_alt_rounded),
+                            : (_showPreview
+                                  ? Icons.camera_alt_outlined
+                                  : Icons.camera_alt_rounded),
                         size: 20,
                       ),
                       label: Text(
-                        _mode == OcrMode.photo ? "Take Photo" : (_showPreview ? "New Photo" : "Capture Image"),
+                        _mode == OcrMode.photo
+                            ? "Take Photo"
+                            : (_showPreview ? "New Photo" : "Capture Image"),
                         style: const TextStyle(fontSize: 15),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                         elevation: 0,
                       ),
                     ),
@@ -813,8 +1526,14 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
             left: 12,
             child: IconButton.filled(
               style: IconButton.styleFrom(backgroundColor: Colors.grey[100]),
-              icon: Icon(_cameraOpen ? Icons.close : Icons.videocam, color: Colors.black87, size: 24),
-              onPressed: _cameraOpen ? _closeCamera : (_modelLoaded ? _openCamera : null),
+              icon: Icon(
+                _cameraOpen ? Icons.close : Icons.videocam,
+                color: Colors.black87,
+                size: 24,
+              ),
+              onPressed: _cameraOpen
+                  ? _closeCamera
+                  : (_modelLoaded ? _openCamera : null),
             ),
           ),
 
@@ -826,7 +1545,10 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                 ? Container(
                     width: 44,
                     height: 44,
-                    decoration: BoxDecoration(color: Colors.grey[100], shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      shape: BoxShape.circle,
+                    ),
                     child: const Padding(
                       padding: EdgeInsets.all(10),
                       child: CircularProgressIndicator(
@@ -838,17 +1560,28 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                 : Column(
                     children: [
                       IconButton.filled(
-                        style: IconButton.styleFrom(backgroundColor: Colors.grey[100]),
-                        icon: const Icon(Icons.folder_open_rounded, color: Colors.black87, size: 22),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.grey[100],
+                        ),
+                        icon: const Icon(
+                          Icons.folder_open_rounded,
+                          color: Colors.black87,
+                          size: 22,
+                        ),
                         onPressed: _loadModelFromPhone,
                         tooltip: 'Load model from device',
                       ),
                       if (_modelLoaded)
                         Container(
                           margin: const EdgeInsets.only(top: 2),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: _modelSource == 'phone' ? Colors.green.withOpacity(0.85) : Colors.grey[200],
+                            color: _modelSource == 'phone'
+                                ? Colors.green.withOpacity(0.85)
+                                : Colors.grey[200],
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -856,7 +1589,9 @@ class _OcrScanScreenState extends State<OcrScanScreen> with SingleTickerProvider
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w600,
-                              color: _modelSource == 'phone' ? Colors.white : Colors.black54,
+                              color: _modelSource == 'phone'
+                                  ? Colors.white
+                                  : Colors.black54,
                             ),
                           ),
                         ),
@@ -906,7 +1641,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
     _recModel = widget.modelSource == 'phone' ? widget.activeRecModel : null;
   }
 
-  bool get _allSelected => _detParam != null && _detModel != null && _recParam != null && _recModel != null;
+  bool get _allSelected =>
+      _detParam != null &&
+      _detModel != null &&
+      _recParam != null &&
+      _recModel != null;
 
   String _fileName(String? path) {
     if (path == null) return '';
@@ -950,7 +1689,10 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
           Container(
             width: 40,
             height: 4,
-            decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(4)),
+            decoration: BoxDecoration(
+              color: Colors.black12,
+              borderRadius: BorderRadius.circular(4),
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -963,7 +1705,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                   color: Colors.green.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.folder_open_rounded, color: Colors.green, size: 22),
+                child: const Icon(
+                  Icons.folder_open_rounded,
+                  color: Colors.green,
+                  size: 22,
+                ),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -972,7 +1718,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                   children: [
                     Text(
                       'Load Model from Device',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
                     ),
                     Text(
                       'Select NCNN model files from storage',
@@ -993,18 +1743,26 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: widget.modelSource == 'phone' ? Colors.green.withOpacity(0.06) : Colors.blue.withOpacity(0.06),
+                color: widget.modelSource == 'phone'
+                    ? Colors.green.withOpacity(0.06)
+                    : Colors.blue.withOpacity(0.06),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: widget.modelSource == 'phone' ? Colors.green.withOpacity(0.2) : Colors.blue.withOpacity(0.2),
+                  color: widget.modelSource == 'phone'
+                      ? Colors.green.withOpacity(0.2)
+                      : Colors.blue.withOpacity(0.2),
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    widget.modelSource == 'phone' ? Icons.smartphone : Icons.inventory_2_outlined,
+                    widget.modelSource == 'phone'
+                        ? Icons.smartphone
+                        : Icons.inventory_2_outlined,
                     size: 16,
-                    color: widget.modelSource == 'phone' ? Colors.green : Colors.blue,
+                    color: widget.modelSource == 'phone'
+                        ? Colors.green
+                        : Colors.blue,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -1013,7 +1771,9 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: widget.modelSource == 'phone' ? Colors.green[700] : Colors.blue[700],
+                        color: widget.modelSource == 'phone'
+                            ? Colors.green[700]
+                            : Colors.blue[700],
                       ),
                     ),
                   ),
@@ -1071,7 +1831,9 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                     foregroundColor: Colors.grey[700],
                     side: BorderSide(color: Colors.grey[300]!),
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   child: const Text('Cancel'),
                 ),
@@ -1089,14 +1851,18 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                         })
                       : null,
                   icon: const Icon(Icons.upload_rounded, size: 18),
-                  label: Text(_allSelected ? 'Load Model' : 'Select all files first'),
+                  label: Text(
+                    _allSelected ? 'Load Model' : 'Select all files first',
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: Colors.grey[200],
                     disabledForegroundColor: Colors.grey[500],
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     elevation: 0,
                   ),
                 ),
@@ -1118,7 +1884,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         const SizedBox(width: 6),
         Text(
           title,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.black54),
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: Colors.black54,
+          ),
         ),
       ],
     );
@@ -1139,12 +1909,16 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
         decoration: BoxDecoration(
           color: hasFile ? Colors.green.withOpacity(0.06) : Colors.grey[50],
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: hasFile ? Colors.green.withOpacity(0.4) : Colors.black12),
+          border: Border.all(
+            color: hasFile ? Colors.green.withOpacity(0.4) : Colors.black12,
+          ),
         ),
         child: Row(
           children: [
             Icon(
-              hasFile ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+              hasFile
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked,
               color: hasFile ? Colors.green : Colors.grey[400],
               size: 20,
             ),
@@ -1155,7 +1929,11 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                 children: [
                   Text(
                     label,
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -1175,11 +1953,19 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                 onTap: onClear,
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.close_rounded, size: 18, color: Colors.grey[400]),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: Colors.grey[400],
+                  ),
                 ),
               )
             else
-              Icon(Icons.folder_open_rounded, size: 18, color: Colors.grey[400]),
+              Icon(
+                Icons.folder_open_rounded,
+                size: 18,
+                color: Colors.grey[400],
+              ),
           ],
         ),
       ),
@@ -1216,14 +2002,74 @@ class _ActionButton extends StatelessWidget {
             decoration: BoxDecoration(
               color: active ? activeColor.withOpacity(0.2) : Colors.white,
               shape: BoxShape.circle,
-              border: Border.all(color: active ? activeColor : Colors.black12, width: 1.5),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
+              border: Border.all(
+                color: active ? activeColor : Colors.black12,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
-            child: Icon(icon, color: active ? activeColor : Colors.black87, size: 24),
+            child: Icon(
+              icon,
+              color: active ? activeColor : Colors.black87,
+              size: 24,
+            ),
           ),
           const SizedBox(height: 6),
-          Text(label, style: TextStyle(color: active ? activeColor : Colors.black54, fontSize: 11)),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? activeColor : Colors.black54,
+              fontSize: 11,
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Preset chip for LED settings ────────────────────────────────────────────
+
+class _PresetChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PresetChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? Colors.deepOrange.withOpacity(0.15)
+              : Colors.grey[100],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? Colors.deepOrange : Colors.grey[300]!,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.deepOrange : Colors.black54,
+          ),
+        ),
       ),
     );
   }
@@ -1251,18 +2097,28 @@ class _HistorySheet extends StatelessWidget {
             Container(
               width: 40,
               height: 4,
-              decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
               "Scan History",
-              style: TextStyle(color: Colors.black87, fontSize: 17, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.black87,
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.separated(
                 controller: scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 itemCount: captures.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (_, i) {
@@ -1273,14 +2129,20 @@ class _HistorySheet extends StatelessWidget {
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.black12),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2)),
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.02),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
                       ],
                     ),
                     child: Row(
                       children: [
                         // Thumbnail
                         ClipRRect(
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(14),
+                          ),
                           child: Image.file(
                             File(cap.photoPath),
                             width: 90,
@@ -1290,7 +2152,10 @@ class _HistorySheet extends StatelessWidget {
                               width: 90,
                               height: 90,
                               color: Colors.grey[200],
-                              child: const Icon(Icons.broken_image, color: Colors.black26),
+                              child: const Icon(
+                                Icons.broken_image,
+                                color: Colors.black26,
+                              ),
                             ),
                           ),
                         ),
@@ -1305,7 +2170,9 @@ class _HistorySheet extends StatelessWidget {
                                 Text(
                                   cap.ocrText.isEmpty ? "No text" : cap.ocrText,
                                   style: TextStyle(
-                                    color: cap.ocrText.isEmpty ? Colors.black38 : Colors.black87,
+                                    color: cap.ocrText.isEmpty
+                                        ? Colors.black38
+                                        : Colors.black87,
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -1315,7 +2182,10 @@ class _HistorySheet extends StatelessWidget {
                                 const SizedBox(height: 6),
                                 Text(
                                   _formatTime(cap.timestamp),
-                                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1373,22 +2243,46 @@ class _CornerBracketPainter extends CustomPainter {
 
     // Top-left
     canvas.drawLine(Offset(r, 0), Offset(r + c, 0), paint);
-    canvas.drawArc(Rect.fromLTWH(0, 0, r * 2, r * 2), -pi / 2, -pi / 2, false, paint);
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, r * 2, r * 2),
+      -pi / 2,
+      -pi / 2,
+      false,
+      paint,
+    );
     canvas.drawLine(Offset(0, r), Offset(0, r + c), paint);
 
     // Top-right
     canvas.drawLine(Offset(w - r - c, 0), Offset(w - r, 0), paint);
-    canvas.drawArc(Rect.fromLTWH(w - r * 2, 0, r * 2, r * 2), -pi / 2, pi / 2, false, paint);
+    canvas.drawArc(
+      Rect.fromLTWH(w - r * 2, 0, r * 2, r * 2),
+      -pi / 2,
+      pi / 2,
+      false,
+      paint,
+    );
     canvas.drawLine(Offset(w, r), Offset(w, r + c), paint);
 
     // Bottom-left
     canvas.drawLine(Offset(0, h - r - c), Offset(0, h - r), paint);
-    canvas.drawArc(Rect.fromLTWH(0, h - r * 2, r * 2, r * 2), pi / 2, pi / 2, false, paint);
+    canvas.drawArc(
+      Rect.fromLTWH(0, h - r * 2, r * 2, r * 2),
+      pi / 2,
+      pi / 2,
+      false,
+      paint,
+    );
     canvas.drawLine(Offset(r, h), Offset(r + c, h), paint);
 
     // Bottom-right
     canvas.drawLine(Offset(w, h - r - c), Offset(w, h - r), paint);
-    canvas.drawArc(Rect.fromLTWH(w - r * 2, h - r * 2, r * 2, r * 2), pi / 2, -pi / 2, false, paint);
+    canvas.drawArc(
+      Rect.fromLTWH(w - r * 2, h - r * 2, r * 2, r * 2),
+      pi / 2,
+      -pi / 2,
+      false,
+      paint,
+    );
     canvas.drawLine(Offset(w - r - c, h), Offset(w - r, h), paint);
   }
 

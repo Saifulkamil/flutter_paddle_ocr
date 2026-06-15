@@ -242,7 +242,36 @@ void MyNdkCamera::det_thread_loop()
             ncnn::MutexLockGuard g(lock);
             if (g_ppocrv5)
             {
-                g_ppocrv5->detect(rgb, objects);
+                cv::Mat det_rgb = rgb;
+                int crop_x = 0;
+                int crop_y = 0;
+                if (target_norm_w > 0.0f && target_norm_h > 0.0f)
+                {
+                    int crop_w = (int)(rgb.cols * target_norm_w);
+                    int crop_h = (int)(rgb.rows * target_norm_h);
+                    if (crop_w > 0 && crop_w <= rgb.cols && crop_h > 0 && crop_h <= rgb.rows)
+                    {
+                        crop_x = (rgb.cols - crop_w) / 2;
+                        crop_y = (int)(rgb.rows * 0.375f) - crop_h / 2;
+                        if (crop_y < 0) crop_y = 0;
+                        if (crop_y + crop_h > rgb.rows) crop_y = rgb.rows - crop_h;
+                        
+                        cv::Rect crop_region(crop_x, crop_y, crop_w, crop_h);
+                        det_rgb = rgb(crop_region).clone();
+                    }
+                }
+
+                g_ppocrv5->detect(det_rgb, objects);
+
+                // shift coordinates back to original rgb space
+                if (crop_x > 0 || crop_y > 0)
+                {
+                    for (size_t i = 0; i < objects.size(); i++)
+                    {
+                        objects[i].rrect.center.x += crop_x;
+                        objects[i].rrect.center.y += crop_y;
+                    }
+                }
             }
         }
 
@@ -293,6 +322,7 @@ void MyNdkCamera::rec_thread_loop()
             ncnn::MutexLockGuard g(lock);
             if (g_ppocrv5)
             {
+                const std::string& char_filter = g_ppocrv5->get_char_filter();
                 for (size_t i = 0; i < objects.size(); i++)
                 {
                     g_ppocrv5->recognize(rgb, objects[i]);
@@ -304,14 +334,17 @@ void MyNdkCamera::rec_thread_loop()
                         if (ch.id >= 0 && ch.id < character_dict_size)
                         {
                             std::string c_str = character_dict[ch.id];
-                            if (c_str.length() == 1) {
-                                char c = c_str[0];
-                                if ((c >= '0' && c <= '9') || 
-                                    (c >= 'A' && c <= 'Z') || 
-                                    (c >= 'a' && c <= 'z') || 
-                                    c == '.') 
+                            if (char_filter.empty())
+                            {
+                                // No filter: accept all characters
+                                line_text += c_str;
+                            }
+                            else
+                            {
+                                // Filter: only accept single-byte chars that are in the filter string
+                                if (c_str.length() == 1 && char_filter.find(c_str[0]) != std::string::npos)
                                 {
-                                    line_text += c;
+                                    line_text += c_str;
                                 }
                             }
                         }
@@ -422,7 +455,9 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
                         if (crop_w > 0 && crop_w <= rgb.cols && crop_h > 0 && crop_h <= rgb.rows) 
                         {
                             int crop_x = (rgb.cols - crop_w) / 2;
-                            int crop_y = (rgb.rows - crop_h) / 2;
+                            int crop_y = (int)(rgb.rows * 0.375f) - crop_h / 2;
+                            if (crop_y < 0) crop_y = 0;
+                            if (crop_y + crop_h > rgb.rows) crop_y = rgb.rows - crop_h;
                             cv::Rect crop_region(crop_x, crop_y, crop_w, crop_h);
                             cv::Mat crop_rgb = rgb(crop_region).clone();
 
@@ -430,6 +465,7 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
                             std::vector<Object> capture_objects;
                             g_ppocrv5->detect_and_recognize(crop_rgb, capture_objects);
 
+                            const std::string& char_filter = g_ppocrv5->get_char_filter();
                             std::string all_text;
                             for (size_t i = 0; i < capture_objects.size(); i++)
                             {
@@ -440,14 +476,15 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
                                     if (ch.id >= 0 && ch.id < character_dict_size)
                                     {
                                         std::string c_str = character_dict[ch.id];
-                                        if (c_str.length() == 1) {
-                                            char c = c_str[0];
-                                            if ((c >= '0' && c <= '9') || 
-                                                (c >= 'A' && c <= 'Z') || 
-                                                (c >= 'a' && c <= 'z') || 
-                                                c == '.') 
+                                        if (char_filter.empty())
+                                        {
+                                            line_text += c_str;
+                                        }
+                                        else
+                                        {
+                                            if (c_str.length() == 1 && char_filter.find(c_str[0]) != std::string::npos)
                                             {
-                                                line_text += c;
+                                                line_text += c_str;
                                             }
                                         }
                                     }
@@ -502,7 +539,11 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
                 ncnn::MutexLockGuard cg(capture_lock);
                 if (capture_requested)
                 {
-                    cv::Mat final_rgb = rgb;
+                    cv::Mat bgr_orig;
+                    cv::cvtColor(rgb, bgr_orig, cv::COLOR_RGB2BGR);
+                    cv::imwrite(capture_save_path, bgr_orig);
+
+                    std::string cropped_path = "";
                     if (target_norm_w > 0.0f && target_norm_h > 0.0f) 
                     {
                         int crop_w = (int)(rgb.cols * target_norm_w);
@@ -510,17 +551,30 @@ void MyNdkCamera::on_image_render(cv::Mat& rgb) const
                         if (crop_w > 0 && crop_w <= rgb.cols && crop_h > 0 && crop_h <= rgb.rows) 
                         {
                             int crop_x = (rgb.cols - crop_w) / 2;
-                            int crop_y = (rgb.rows - crop_h) / 2;
+                            int crop_y = (int)(rgb.rows * 0.375f) - crop_h / 2;
+                            if (crop_y < 0) crop_y = 0;
+                            if (crop_y + crop_h > rgb.rows) crop_y = rgb.rows - crop_h;
                             cv::Rect crop_region(crop_x, crop_y, crop_w, crop_h);
-                            final_rgb = rgb(crop_region).clone();
+                            cv::Mat crop_rgb = rgb(crop_region).clone();
+
+                            cv::Mat bgr_crop;
+                            cv::cvtColor(crop_rgb, bgr_crop, cv::COLOR_RGB2BGR);
+
+                            size_t dot_pos = capture_save_path.find_last_of('.');
+                            if (dot_pos != std::string::npos) {
+                                cropped_path = capture_save_path.substr(0, dot_pos) + "_crop" + capture_save_path.substr(dot_pos);
+                            } else {
+                                cropped_path = capture_save_path + "_crop.jpg";
+                            }
+                            cv::imwrite(cropped_path, bgr_crop);
                         }
                     }
 
-                    cv::Mat bgr;
-                    cv::cvtColor(final_rgb, bgr, cv::COLOR_RGB2BGR);
-                    cv::imwrite(capture_save_path, bgr);
-
-                    captured_photo_path = capture_save_path;
+                    if (!cropped_path.empty()) {
+                        captured_photo_path = capture_save_path + "|" + cropped_path;
+                    } else {
+                        captured_photo_path = capture_save_path;
+                    }
                     capture_requested = false;
                 }
             }
@@ -742,6 +796,41 @@ JNIEXPORT jboolean JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_setPhotoMode(JNIEnv* e
     return JNI_FALSE;
 }
 
+// public native boolean setLedParams(int valueThresh, int rThresh, int morphSize);
+// valueThresh: HSV Value threshold (0=disabled/general mode, 180-200 recommended for LED)
+// rThresh: R-channel threshold (0=disabled, 150-180 recommended)
+// morphSize: morphological kernel size (0=disabled, 3 or 5 recommended)
+JNIEXPORT jboolean JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_setLedParams(JNIEnv* env, jobject thiz, jint valueThresh, jint rThresh, jint morphSize)
+{
+    ncnn::MutexLockGuard g(lock);
+    if (g_ppocrv5)
+    {
+        g_ppocrv5->set_led_params((int)valueThresh, (int)rThresh, (int)morphSize);
+        __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "setLedParams: value=%d, r=%d, morph=%d", (int)valueThresh, (int)rThresh, (int)morphSize);
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+// public native boolean setCharFilter(String allowedChars);
+// allowedChars: string of allowed characters (empty string = accept all)
+// Example: "0123456789." for digits only, "0123456789ABCDEFabcdef." for hex
+JNIEXPORT jboolean JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_setCharFilter(JNIEnv* env, jobject thiz, jstring allowedChars)
+{
+    const char* chars = env->GetStringUTFChars(allowedChars, nullptr);
+    std::string filter_str(chars);
+    env->ReleaseStringUTFChars(allowedChars, chars);
+
+    ncnn::MutexLockGuard g(lock);
+    if (g_ppocrv5)
+    {
+        g_ppocrv5->set_char_filter(filter_str);
+        __android_log_print(ANDROID_LOG_DEBUG, "ncnn", "setCharFilter: '%s' (length=%d)", filter_str.c_str(), (int)filter_str.length());
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
 // public native String ocrFromImage(String imagePath);
 JNIEXPORT jstring JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_ocrFromImage(JNIEnv* env, jobject thiz, jstring imagePath)
 {
@@ -773,7 +862,8 @@ JNIEXPORT jstring JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_ocrFromImage(JNIEnv* en
     std::vector<Object> objects;
     g_ppocrv5->detect_and_recognize(rgb, objects);
 
-    // extract OCR text (same logic as on_image_render)
+    // extract OCR text - filter depends on char_filter setting
+    const std::string& char_filter = g_ppocrv5->get_char_filter();
     std::string all_text;
     for (size_t i = 0; i < objects.size(); i++)
     {
@@ -783,7 +873,18 @@ JNIEXPORT jstring JNICALL Java_com_iweka_ocr_PPOCRv5Ncnn_ocrFromImage(JNIEnv* en
             const Character& ch = objects[i].text[j];
             if (ch.id >= 0 && ch.id < character_dict_size)
             {
-                line_text += character_dict[ch.id];
+                std::string c_str = character_dict[ch.id];
+                if (char_filter.empty())
+                {
+                    line_text += c_str;
+                }
+                else
+                {
+                    if (c_str.length() == 1 && char_filter.find(c_str[0]) != std::string::npos)
+                    {
+                        line_text += c_str;
+                    }
+                }
             }
         }
         if (!line_text.empty())

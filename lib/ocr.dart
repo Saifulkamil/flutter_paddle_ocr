@@ -1,4 +1,3 @@
-
 import 'ocr_platform_interface.dart';
 
 class Ocr {
@@ -70,6 +69,54 @@ class Ocr {
   /// Run OCR on a static image file. Returns recognized text.
   Future<String?> ocrFromImage(String imagePath) {
     return OcrPlatform.instance.ocrFromImage(imagePath);
+  }
+
+  /// Set LED display preprocessing parameters.
+  /// All values at 0 = General text mode (no preprocessing, reads any text).
+  /// [valueThresh] - HSV Value threshold (0=off, 180-200 recommended for LED ghosting removal)
+  /// [rThresh] - R-channel threshold (0=off, 150-180 recommended)
+  /// [morphSize] - Morphological kernel size (0=off, 3 or 5 recommended)
+  Future<bool> setLedParams(int valueThresh, int rThresh, int morphSize) {
+    return OcrPlatform.instance.setLedParams(valueThresh, rThresh, morphSize);
+  }
+
+  /// Set character filter for OCR output.
+  ///
+  /// Controls which characters are accepted in the final OCR result.
+  /// Any character recognized by the model that is NOT in [allowedChars]
+  /// will be silently discarded from the output.
+  ///
+  /// [allowedChars] - A string containing all characters to accept.
+  ///   - Empty string `''` = accept ALL characters (default behavior).
+  ///   - Only single-byte (ASCII) characters are supported for filtering.
+  ///   - Multi-byte characters (Chinese, Japanese, etc.) are always discarded
+  ///     when a filter is active.
+  ///
+  /// This setting persists until changed again. It works independently from
+  /// [setLedParams] — you can use char filter with or without LED preprocessing.
+  ///
+  /// Usage examples:
+  /// ```dart
+  /// // Default: accept all characters (no filtering)
+  /// await ocr.setCharFilter('');
+  ///
+  /// // Digits + dot only (for LED displays, scales, meters)
+  /// await ocr.setCharFilter('0123456789.');
+  ///
+  /// // Digits + dot + minus (for negative values)
+  /// await ocr.setCharFilter('0123456789.-');
+  ///
+  /// // Uppercase alphanumeric (for serial numbers, license plates)
+  /// await ocr.setCharFilter('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+  ///
+  /// // Full alphanumeric + dot (general filtered)
+  /// await ocr.setCharFilter('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.');
+  ///
+  /// // Hex characters only
+  /// await ocr.setCharFilter('0123456789ABCDEFabcdef');
+  /// ```
+  Future<bool> setCharFilter(String allowedChars) {
+    return OcrPlatform.instance.setCharFilter(allowedChars);
   }
 
   /// Launch native image cropper for the given image path. Returns the cropped image path.

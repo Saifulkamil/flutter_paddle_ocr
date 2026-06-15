@@ -19,6 +19,19 @@
 
 #include <net.h>
 
+#include <string>
+
+// OCR Mode constants
+// 0 = General text (no preprocessing, reads any text)
+// 1 = LED/Seven-segment display (red LED filter to remove ghosting)
+#define OCR_MODE_GENERAL 0
+#define OCR_MODE_LED_DISPLAY 1
+
+// Default LED preprocessing parameters
+#define DEFAULT_LED_VALUE_THRESH 0
+#define DEFAULT_LED_R_THRESH 0
+#define DEFAULT_LED_MORPH_SIZE 0
+
 struct Character
 {
     int id;
@@ -43,6 +56,11 @@ public:
     int load(AAssetManager* mgr, const char* det_parampath, const char* det_modelpath, const char* rec_parampath, const char* rec_modelpath, bool use_fp16 = false, bool use_gpu = false);
 
     void set_target_size(int target_size);
+    void set_ocr_mode(int mode);
+    int get_ocr_mode() const;
+    void set_led_params(int value_thresh, int r_thresh, int morph_size);
+    void set_char_filter(const std::string& allowed_chars);
+    const std::string& get_char_filter() const;
 
     int detect(const cv::Mat& rgb, std::vector<Object>& objects);
 
@@ -55,6 +73,11 @@ protected:
     ncnn::Net ppocrv5_det;
     ncnn::Net ppocrv5_rec;
     int target_size;
+    int ocr_mode; // 0=general, 1=LED display
+    int led_value_thresh;  // HSV Value threshold (0=disabled, typical: 180-200)
+    int led_r_thresh;      // R-channel threshold (0=disabled, typical: 150-180)
+    int led_morph_size;    // Morphological kernel size (0=disabled, typical: 3 or 5)
+    std::string char_filter; // Allowed characters (empty = all characters accepted)
 };
 
 #endif // PPOCRV5_H

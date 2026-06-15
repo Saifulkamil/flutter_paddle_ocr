@@ -82,6 +82,24 @@ abstract class OcrPlatform extends PlatformInterface {
     throw UnimplementedError('ocrFromImage() has not been implemented.');
   }
 
+  /// Set LED preprocessing parameters.
+  /// All values at 0 = General text mode (no preprocessing).
+  /// [valueThresh] - HSV Value threshold (recommended: 180-200, 0=disabled)
+  /// [rThresh] - R-channel brightness threshold (recommended: 150-180, 0=disabled)
+  /// [morphSize] - Morphological opening kernel size (recommended: 3 or 5, 0=disabled)
+  Future<bool> setLedParams(int valueThresh, int rThresh, int morphSize) {
+    throw UnimplementedError('setLedParams() has not been implemented.');
+  }
+
+  /// Set character filter for OCR output.
+  ///
+  /// [allowedChars] - string of allowed characters (empty string = accept all characters).
+  /// Only single-byte ASCII characters are supported for filtering.
+  /// See [Ocr.setCharFilter] for full documentation and examples.
+  Future<bool> setCharFilter(String allowedChars) {
+    throw UnimplementedError('setCharFilter() has not been implemented.');
+  }
+
   /// Launch native image cropper for the given image path. Returns the cropped image path.
   Future<String?> cropImage(String sourcePath) {
     throw UnimplementedError('cropImage() has not been implemented.');

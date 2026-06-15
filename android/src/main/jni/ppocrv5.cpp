@@ -28,6 +28,48 @@
 
 #include "myfontface.h"
 
+static cv::Mat preprocess_led_display(const cv::Mat& input_rgb, int value_thresh, int r_thresh, int morph_size) {
+    if (input_rgb.empty()) return cv::Mat();
+
+    cv::Mat hsv;
+    cv::cvtColor(input_rgb, hsv, cv::COLOR_RGB2HSV);
+
+    cv::Mat mask1, mask2, red_mask;
+    // Memperlebar range Hue (0-15 dan 160-180) untuk mencakup merah hingga sedikit oranye.
+    // Menurunkan Saturation ke 50 karena bagian tengah LED yang sangat terang seringkali tampak putih.
+    // Value threshold dikonfigurasi via parameter untuk menghilangkan ghosting/bayangan segmen yang mati.
+    // Segmen LED yang NYALA punya Value > 200, sedangkan ghosting biasanya 100-160.
+    cv::inRange(hsv, cv::Scalar(0, 50, value_thresh), cv::Scalar(15, 255, 255), mask1);
+    cv::inRange(hsv, cv::Scalar(160, 50, value_thresh), cv::Scalar(180, 255, 255), mask2);
+    cv::bitwise_or(mask1, mask2, red_mask);
+
+    // Tambahan: filter berdasarkan intensitas pixel di channel RGB.
+    // Segmen LED yang benar-benar nyala memiliki R channel yang tinggi.
+    // Ini membantu membuang ghosting yang lolos filter HSV.
+    if (r_thresh > 0) {
+        cv::Mat channels[3];
+        cv::split(input_rgb, channels); // channels[0]=R, channels[1]=G, channels[2]=B
+        cv::Mat bright_mask;
+        cv::threshold(channels[0], bright_mask, r_thresh, 255, cv::THRESH_BINARY);
+        cv::bitwise_and(red_mask, bright_mask, red_mask);
+    }
+
+    // Morphological opening untuk membuang noise kecil (titik-titik ghosting yang tersisa)
+    if (morph_size > 0) {
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(morph_size, morph_size));
+        cv::morphologyEx(red_mask, red_mask, cv::MORPH_OPEN, kernel);
+    }
+
+    // Jangan gunakan Binarization (Threshold 255/0) karena model OCR butuh "anti-aliasing" 
+    // dan gradasi warna asli agar tidak pecah/bergerigi (jagged edges).
+    // Sebagai gantinya, kita gunakan mask untuk mengambil pixel warna aslinya, 
+    // dan menghitamkan sisanya.
+    cv::Mat rgb_result = cv::Mat::zeros(input_rgb.size(), input_rgb.type());
+    input_rgb.copyTo(rgb_result, red_mask);
+
+    return rgb_result;
+}
+
 static double contour_score(const cv::Mat& binary, const std::vector<cv::Point>& contour)
 {
     cv::Rect rect = cv::boundingRect(contour);
@@ -131,10 +173,48 @@ static cv::Mat get_rotate_crop_image(const cv::Mat& rgb, const Object& object)
 PPOCRv5::PPOCRv5()
 {
     target_size = 640;
+    ocr_mode = OCR_MODE_GENERAL;
+    led_value_thresh = DEFAULT_LED_VALUE_THRESH;
+    led_r_thresh = DEFAULT_LED_R_THRESH;
+    led_morph_size = DEFAULT_LED_MORPH_SIZE;
 }
 
 PPOCRv5::~PPOCRv5()
 {
+}
+
+void PPOCRv5::set_ocr_mode(int mode)
+{
+    ocr_mode = mode;
+}
+
+int PPOCRv5::get_ocr_mode() const
+{
+    return ocr_mode;
+}
+
+void PPOCRv5::set_led_params(int value_thresh, int r_thresh, int morph_size)
+{
+    led_value_thresh = value_thresh;
+    led_r_thresh = r_thresh;
+    led_morph_size = morph_size;
+
+    // Auto-set ocr_mode based on whether any LED param is active
+    if (value_thresh > 0 || r_thresh > 0 || morph_size > 0) {
+        ocr_mode = OCR_MODE_LED_DISPLAY;
+    } else {
+        ocr_mode = OCR_MODE_GENERAL;
+    }
+}
+
+void PPOCRv5::set_char_filter(const std::string& allowed_chars)
+{
+    char_filter = allowed_chars;
+}
+
+const std::string& PPOCRv5::get_char_filter() const
+{
+    return char_filter;
 }
 
 int PPOCRv5::load(const char* det_parampath, const char* det_modelpath, const char* rec_parampath, const char* rec_modelpath, bool use_fp16, bool use_gpu)
@@ -230,8 +310,19 @@ int PPOCRv5::detect(const cv::Mat& rgb, std::vector<Object>& objects)
 {
     cv::setNumThreads(ncnn::get_big_cpu_count());
 
-    int img_w = rgb.cols;
-    int img_h = rgb.rows;
+    // Only apply LED preprocessing in LED display mode
+    cv::Mat clean_rgb;
+    if (ocr_mode == OCR_MODE_LED_DISPLAY)
+    {
+        clean_rgb = preprocess_led_display(rgb, led_value_thresh, led_r_thresh, led_morph_size);
+    }
+    else
+    {
+        clean_rgb = rgb;
+    }
+
+    int img_w = clean_rgb.cols;
+    int img_h = clean_rgb.rows;
 
     const int target_stride = 32;
 
@@ -255,7 +346,7 @@ int PPOCRv5::detect(const cv::Mat& rgb, std::vector<Object>& objects)
         }
     }
 
-    ncnn::Mat in = ncnn::Mat::from_pixels_resize(rgb.data, ncnn::Mat::PIXEL_RGB2BGR, img_w, img_h, w, h);
+    ncnn::Mat in = ncnn::Mat::from_pixels_resize(clean_rgb.data, ncnn::Mat::PIXEL_RGB2BGR, img_w, img_h, w, h);
 
     int wpad = (w + target_stride - 1) / target_stride * target_stride - w;
     int hpad = (h + target_stride - 1) / target_stride * target_stride - h;
@@ -376,8 +467,19 @@ int PPOCRv5::recognize(const cv::Mat& rgb, Object& object)
     cv::setNumThreads(1);
 
     cv::Mat roi = get_rotate_crop_image(rgb, object);
+    
+    // Only apply LED preprocessing in LED display mode
+    cv::Mat clean_roi;
+    if (ocr_mode == OCR_MODE_LED_DISPLAY)
+    {
+        clean_roi = preprocess_led_display(roi, led_value_thresh, led_r_thresh, led_morph_size);
+    }
+    else
+    {
+        clean_roi = roi;
+    }
 
-    ncnn::Mat in = ncnn::Mat::from_pixels(roi.data, ncnn::Mat::PIXEL_RGB2BGR, roi.cols, roi.rows);
+    ncnn::Mat in = ncnn::Mat::from_pixels(clean_roi.data, ncnn::Mat::PIXEL_RGB2BGR, clean_roi.cols, clean_roi.rows);
 
     // ~/.paddlex/official_models/PP-OCRv5_mobile_rec/inference.yml
     const float mean_vals[3] = {127.5, 127.5, 127.5};
@@ -513,24 +615,15 @@ int PPOCRv5::draw(cv::Mat& rgb, const std::vector<Object>& objects)
             }
 
             std::string c_str = character_dict[ch.id];
-            if (c_str.length() == 1) {
-                char c = c_str[0];
-                if ((c >= '0' && c <= '9') || 
-                    (c >= 'A' && c <= 'Z') || 
-                    (c >= 'a' && c <= 'z') || 
-                    c == '.') 
-                {
-                    if (obj.orientation == 0)
-                    {
-                        text += c;
-                    }
-                    else
-                    {
-                        text += c;
-                        if (j + 1 < objects[i].text.size())
-                            text += "\n";
-                    }
-                }
+            if (obj.orientation == 0)
+            {
+                text += c_str;
+            }
+            else
+            {
+                text += c_str;
+                if (j + 1 < objects[i].text.size())
+                    text += "\n";
             }
         }
 
